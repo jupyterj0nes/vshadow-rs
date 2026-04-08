@@ -5,7 +5,7 @@
   <br><br>
 
   [![Crates.io](https://img.shields.io/crates/v/vshadow.svg)](https://crates.io/crates/vshadow)
-  [![License](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue.svg)]()
+  [![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
   [![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
   [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)]()
 
@@ -200,7 +200,7 @@ The delta (changed blocks) tells you how much the disk changed since the snapsho
 
 ## License
 
-Dual-licensed under MIT and Apache 2.0.
+GNU Affero General Public License v3.0 — see [LICENSE](LICENSE) for details.
 
 ## Credits
 

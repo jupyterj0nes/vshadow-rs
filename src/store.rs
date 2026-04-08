@@ -36,20 +36,41 @@ impl StoreInfo {
         }
     }
 
-    /// Convert FILETIME to a human-readable UTC string.
+    /// Convert FILETIME to a human-readable UTC date string (YYYY-MM-DD HH:MM:SS UTC).
     pub fn creation_time_utc(&self) -> String {
+        if self.creation_time == 0 {
+            return "unknown".to_string();
+        }
         // FILETIME: 100-nanosecond intervals since 1601-01-01
-        // Unix epoch offset: 11644473600 seconds
         let secs_since_1601 = self.creation_time / 10_000_000;
         let unix_secs = secs_since_1601.saturating_sub(11_644_473_600);
-        // Simple UTC format without chrono dependency
-        let days = unix_secs / 86400;
+
         let time_of_day = unix_secs % 86400;
         let hours = time_of_day / 3600;
         let minutes = (time_of_day % 3600) / 60;
         let seconds = time_of_day % 60;
-        // Rough date calculation (good enough for display)
-        format!("~{} days since epoch, {:02}:{:02}:{:02} UTC", days, hours, minutes, seconds)
+
+        // Calculate year/month/day from unix timestamp
+        let mut days = (unix_secs / 86400) as i64;
+        let mut year = 1970i64;
+
+        loop {
+            let days_in_year = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 366 } else { 365 };
+            if days < days_in_year { break; }
+            days -= days_in_year;
+            year += 1;
+        }
+
+        let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+        let month_days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        let mut month = 0usize;
+        for (i, &md) in month_days.iter().enumerate() {
+            if days < md as i64 { month = i; break; }
+            days -= md as i64;
+        }
+
+        format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
+            year, month + 1, days + 1, hours, minutes, seconds)
     }
 }
 

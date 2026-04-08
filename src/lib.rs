@@ -113,6 +113,20 @@ impl VssVolume {
         Ok(StoreInfo::from_meta_and_location(meta, loc))
     }
 
+    /// Count changed blocks in a store. Returns (block_count, delta_size_bytes).
+    pub fn store_delta_size<R: Read + Seek>(
+        &self,
+        reader: &mut R,
+        index: usize,
+    ) -> Result<(usize, u64), VssError> {
+        let (_, loc) = self.stores.get(index)
+            .ok_or(VssError::InvalidStoreIndex(index))?;
+        let block_map = store::parse_block_descriptors(reader, loc.block_list_offset)?;
+        let count = block_map.len();
+        let size = count as u64 * BLOCK_SIZE;
+        Ok((count, size))
+    }
+
     /// Create a reader for a specific VSS store.
     /// The returned reader implements Read + Seek and presents the volume
     /// as it appeared at the time of the snapshot.

@@ -22,22 +22,40 @@ pub struct VssVolumeHeader {
     pub volume_size: u64,
 }
 
-/// Known VSS identifier GUID: {6B87080 ...} in mixed-endian
-const VSS_GUID_BYTES: [u8; 16] = [
-    0x6B, 0x87, 0x08, 0x38, 0x76, 0xB1, 0x48, 0x42,
-    0xB7, 0xD5, 0xCE, 0xB9, 0xC0, 0x86, 0x74, 0x7A,
-];
+/// Known VSS identifier GUID: {6B870838-76B1-4842-B7D5-CEB9C086747A}
+/// On disk, GUIDs are stored in mixed-endian format:
+/// - Data1 (4 bytes): little-endian
+/// - Data2 (2 bytes): little-endian
+/// - Data3 (2 bytes): little-endian
+/// - Data4 (8 bytes): big-endian (as-is)
+///
+/// However, the VSS identifier at offset 0x1E00 is a volume-specific GUID,
+/// NOT the fixed VSS GUID. We identify VSS by checking the record_type field
+/// (bytes 20-24) which should be 0x00000001 for a VSS volume header,
+/// AND verifying the first 4 bytes match 0x6B870838 in either endian form.
+const VSS_MAGIC_LE: [u8; 4] = [0x38, 0x08, 0x87, 0x6B]; // LE form
+const VSS_MAGIC_BE: [u8; 4] = [0x6B, 0x87, 0x08, 0x38]; // BE/canonical form
 
 impl VssVolumeHeader {
     pub fn parse<R: Read + Seek>(reader: &mut R) -> Result<Self, VssError> {
         let mut buf = [0u8; 128];
         reader.read_exact(&mut buf).map_err(VssError::Io)?;
 
-        // Verify VSS signature
-        let vss_id: [u8; 16] = buf[0..16].try_into().unwrap();
-        if vss_id != VSS_GUID_BYTES {
+        // Verify VSS signature: check first 4 bytes of GUID + record_type
+        let first4: [u8; 4] = buf[0..4].try_into().unwrap();
+        let record_type = u32::from_le_bytes(buf[20..24].try_into().unwrap());
+
+        #[cfg(debug_assertions)]
+        {
+            eprintln!("[VSS DEBUG] First 4 bytes: {:02X?}, record_type: {:#x}", &first4, record_type);
+        }
+
+        let is_vss = (first4 == VSS_MAGIC_LE || first4 == VSS_MAGIC_BE) && record_type == 0x01;
+        if !is_vss {
             return Err(VssError::InvalidSignature);
         }
+
+        let vss_id: [u8; 16] = buf[0..16].try_into().unwrap();
 
         let version = u32::from_le_bytes(buf[16..20].try_into().unwrap());
         let record_type = u32::from_le_bytes(buf[20..24].try_into().unwrap());

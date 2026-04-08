@@ -96,8 +96,19 @@ fn main() {
 //  INFO command
 // ─────────────────────────────────────────────────────────────────────────────
 
+fn print_banner() {
+    println!();
+    println!("  \x1b[36m╔═══════════════════════════════════════╗\x1b[0m");
+    println!("  \x1b[36m║\x1b[0m  \x1b[1;36mvshadow-info\x1b[0m v{}                 \x1b[36m║\x1b[0m", env!("CARGO_PKG_VERSION"));
+    println!("  \x1b[36m║\x1b[0m  \x1b[2mVolume Shadow Copy Inspector\x1b[0m        \x1b[36m║\x1b[0m");
+    println!("  \x1b[36m║\x1b[0m  \x1b[2mby Tono Diaz (@jupyterj0nes)\x1b[0m        \x1b[36m║\x1b[0m");
+    println!("  \x1b[36m║\x1b[0m  \x1b[2mweinvestigateanything.com\x1b[0m           \x1b[36m║\x1b[0m");
+    println!("  \x1b[36m╚═══════════════════════════════════════╝\x1b[0m");
+    println!();
+}
+
 fn cmd_info(file: &str, user_offset: Option<u64>) {
-    println!("vshadow-info v{}", env!("CARGO_PKG_VERSION"));
+    print_banner();
     println!("Inspecting: {}", file);
     println!();
 
@@ -114,31 +125,43 @@ fn cmd_info(file: &str, user_offset: Option<u64>) {
         println!();
 
         for (i, offset) in offsets.iter().enumerate() {
-            println!("=== Partition {} (offset {:#x}, {:.2} GB) ===",
-                i + 1, offset, *offset as f64 / 1_073_741_824.0);
+            println!("=== Partition {} ===", i + 1);
+            println!("  Offset:          {:#x} ({:.2} GB into disk)", offset, *offset as f64 / 1_073_741_824.0);
 
             let mut pr = OffsetReader::new(reader, *offset);
             match VssVolume::new(&mut pr) {
                 Ok(vss) if vss.store_count() > 0 => {
-                    println!("  {} Volume Shadow Copy snapshot(s) found!", vss.store_count());
+                    println!("  VSS detected:    YES (signature found at partition offset 0x1E00)");
+                    println!("  Snapshots:       {}", vss.store_count());
                     println!();
                     for s in 0..vss.store_count() {
                         if let Ok(info) = vss.store_info(s) {
                             let guid = uuid::Uuid::from_bytes_le(info.store_id);
                             println!("  Store {}:", s);
-                            println!("    GUID:          {}", guid);
-                            println!("    Volume size:   {:.2} GB", info.volume_size as f64 / 1_073_741_824.0);
-                            println!("    Creation time: {}", info.creation_time_utc());
-                            println!("    Sequence:      {}", info.sequence);
+                            println!("    GUID:            {}", guid);
+                            println!("    Created:         {}", info.creation_time_utc());
+                            println!("    Sequence:        {}", info.sequence);
+
+                            // Show delta size (changed blocks)
+                            match vss.store_delta_size(&mut pr, s) {
+                                Ok((blocks, bytes)) => {
+                                    println!("    Changed blocks:  {} ({} modified since snapshot)",
+                                        blocks, format_size(bytes));
+                                }
+                                Err(_) => {}
+                            }
                             println!();
                         }
                     }
                 }
-                Ok(_) => println!("  No Volume Shadow Copies found"),
-                Err(vshadow::VssError::InvalidSignature) => {
-                    println!("  No VSS signature (System Protection may be disabled)");
+                Ok(_) => {
+                    println!("  VSS detected:    NO (signature present but no stores found)");
                 }
-                Err(e) => println!("  Error: {}", e),
+                Err(vshadow::VssError::InvalidSignature) => {
+                    println!("  VSS detected:    NO (no VSS signature at partition offset 0x1E00)");
+                    println!("                   System Protection was likely disabled on this volume");
+                }
+                Err(e) => println!("  VSS detected:    ERROR ({})", e),
             }
             println!();
         }

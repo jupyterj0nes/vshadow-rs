@@ -18,3 +18,4 @@ path = "src/bin/vshadow_info.rs"
 uuid = { version = "1", features = ["v4"] }
 clap = { version = "4", features = ["derive"] }
 ewf = "0.2"
+ntfs = "0.4"

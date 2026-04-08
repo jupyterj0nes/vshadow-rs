@@ -1,6 +1,6 @@
 [package]
 name = "vshadow"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "Pure Rust parser for Windows Volume Shadow Copy (VSS) snapshots. Read-only access to VSS stores from forensic disk images without Windows APIs."
 authors = ["Tono Diaz <c00pr@pm.me> (@jupyterj0nes)"]

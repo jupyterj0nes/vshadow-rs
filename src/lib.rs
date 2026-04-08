@@ -98,7 +98,15 @@ impl VssVolume {
         // Sort by creation time (oldest first)
         stores.sort_by_key(|(m, _)| m.creation_time);
 
-        Ok(Self { header, stores })
+        // Update volume_size from store metadata (header doesn't contain it)
+        let mut hdr = header;
+        if let Some((meta, _)) = stores.first() {
+            if meta.volume_size > 0 {
+                hdr.volume_size = meta.volume_size;
+            }
+        }
+
+        Ok(Self { header: hdr, stores })
     }
 
     /// Number of VSS stores (snapshots) found.

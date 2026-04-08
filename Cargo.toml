@@ -10,5 +10,11 @@ keywords = ["forensics", "vss", "shadow-copy", "dfir", "ntfs"]
 categories = ["filesystem", "parser-implementations"]
 readme = "README.md"
 
+[[bin]]
+name = "vshadow-info"
+path = "src/bin/vshadow_info.rs"
+
 [dependencies]
 uuid = { version = "1", features = ["v4"] }
+clap = { version = "4", features = ["derive"] }
+ewf = "0.2"

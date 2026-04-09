@@ -1334,7 +1334,271 @@ fn timeline_walk<R: Read + Seek>(
 //  Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Resolve an input path that might be a device, volume, or mount point.
+/// Returns (resolved_path, is_device).
+fn resolve_device_path(input: &str) -> (String, bool) {
+    // Windows: \\.\PhysicalDriveN or \\.\X: → already a device path
+    if input.starts_with("\\\\.\\") {
+        return (input.to_string(), true);
+    }
+
+    // Windows: bare drive letter (D: or D:\) → convert to \\.\D:
+    #[cfg(windows)]
+    {
+        let trimmed = input.trim_end_matches(&['\\', '/'][..]);
+        if trimmed.len() == 2
+            && trimmed.as_bytes()[0].is_ascii_alphabetic()
+            && trimmed.as_bytes()[1] == b':'
+        {
+            let device = format!("\\\\.\\{}", trimmed);
+            println!("Resolved {} \u{2192} {}", input, device);
+            return (device, true);
+        }
+    }
+
+    // Linux/macOS: /dev/xxx → device path
+    #[cfg(unix)]
+    {
+        if input.starts_with("/dev/") {
+            return (input.to_string(), true);
+        }
+
+        // Try to resolve mount point via /proc/mounts (Linux)
+        if let Ok(content) = std::fs::read_to_string("/proc/mounts") {
+            let input_clean = input.trim_end_matches('/');
+            for line in content.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    let mount_point = parts[1].trim_end_matches('/');
+                    if mount_point == input_clean && parts[0].starts_with("/dev/") {
+                        println!("Resolved mount point {} \u{2192} {}", input, parts[0]);
+                        return (parts[0].to_string(), true);
+                    }
+                }
+            }
+        }
+
+        // macOS: use diskutil or stat to resolve mount points
+        #[cfg(target_os = "macos")]
+        {
+            if std::path::Path::new(input).is_dir() {
+                if let Ok(output) = std::process::Command::new("df").arg(input).output() {
+                    if let Ok(stdout) = String::from_utf8(output.stdout) {
+                        if let Some(last_line) = stdout.lines().last() {
+                            let dev = last_line.split_whitespace().next().unwrap_or("");
+                            if dev.starts_with("/dev/") {
+                                println!("Resolved mount point {} \u{2192} {}", input, dev);
+                                return (dev.to_string(), true);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    (input.to_string(), false)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Sector-aligned reader for raw device I/O
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Windows volume/disk handles require sector-aligned reads.
+/// This wrapper handles alignment transparently.
+struct SectorReader {
+    inner: File,
+    sector_size: usize,
+    cache: Vec<u8>,
+    cache_start: u64,
+    cache_len: usize,
+    pos: u64,
+    size: u64,
+}
+
+impl SectorReader {
+    fn new(inner: File, sector_size: usize, size: u64) -> Self {
+        Self {
+            inner,
+            sector_size,
+            cache: vec![0u8; sector_size * 128], // 64 KB cache
+            cache_start: u64::MAX,
+            cache_len: 0,
+            pos: 0,
+            size,
+        }
+    }
+
+    fn fill_cache(&mut self, offset: u64) -> std::io::Result<()> {
+        let aligned = (offset / self.sector_size as u64) * self.sector_size as u64;
+        // Check if already cached
+        if self.cache_start != u64::MAX
+            && aligned >= self.cache_start
+            && aligned < self.cache_start + self.cache_len as u64
+        {
+            return Ok(());
+        }
+        self.inner.seek(SeekFrom::Start(aligned))?;
+        self.cache_len = self.inner.read(&mut self.cache)?;
+        self.cache_start = aligned;
+        Ok(())
+    }
+}
+
+impl Read for SectorReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.size > 0 && self.pos >= self.size {
+            return Ok(0);
+        }
+        let mut total = 0;
+        while total < buf.len() {
+            self.fill_cache(self.pos)?;
+            if self.cache_start == u64::MAX || self.cache_len == 0 {
+                break;
+            }
+            let offset_in_cache = (self.pos - self.cache_start) as usize;
+            if offset_in_cache >= self.cache_len {
+                break;
+            }
+            let available = self.cache_len - offset_in_cache;
+            let to_copy = (buf.len() - total).min(available);
+            buf[total..total + to_copy]
+                .copy_from_slice(&self.cache[offset_in_cache..offset_in_cache + to_copy]);
+            self.pos += to_copy as u64;
+            total += to_copy;
+        }
+        Ok(total)
+    }
+}
+
+impl Seek for SectorReader {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        self.pos = match pos {
+            SeekFrom::Start(n) => n,
+            SeekFrom::End(n) => {
+                if self.size > 0 {
+                    (self.size as i64 + n) as u64
+                } else {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Unsupported,
+                        "cannot seek from end: device size unknown",
+                    ));
+                }
+            }
+            SeekFrom::Current(n) => (self.pos as i64 + n) as u64,
+        };
+        Ok(self.pos)
+    }
+}
+
+/// Get device/volume size using platform-specific methods.
+fn get_device_size(file: &File) -> u64 {
+    #[cfg(windows)]
+    {
+        get_device_size_ioctl(file)
+    }
+    #[cfg(not(windows))]
+    {
+        // On Unix, clone the fd and seek to end
+        if let Ok(mut dup) = file.try_clone() {
+            let size = dup.seek(SeekFrom::End(0)).unwrap_or(0);
+            let _ = dup.seek(SeekFrom::Start(0));
+            size
+        } else {
+            0
+        }
+    }
+}
+
+#[cfg(windows)]
+fn get_device_size_ioctl(file: &File) -> u64 {
+    use std::os::windows::io::AsRawHandle;
+
+    const IOCTL_DISK_GET_LENGTH_INFO: u32 = 0x0007405C;
+
+    extern "system" {
+        fn DeviceIoControl(
+            hDevice: isize,
+            dwIoControlCode: u32,
+            lpInBuffer: *const u8,
+            nInBufferSize: u32,
+            lpOutBuffer: *mut u8,
+            nOutBufferSize: u32,
+            lpBytesReturned: *mut u32,
+            lpOverlapped: *const u8,
+        ) -> i32;
+    }
+
+    let mut length: i64 = 0;
+    let mut returned: u32 = 0;
+
+    let result = unsafe {
+        DeviceIoControl(
+            file.as_raw_handle() as isize,
+            IOCTL_DISK_GET_LENGTH_INFO,
+            std::ptr::null(),
+            0,
+            &mut length as *mut i64 as *mut u8,
+            std::mem::size_of::<i64>() as u32,
+            &mut returned,
+            std::ptr::null(),
+        )
+    };
+
+    if result != 0 && length > 0 {
+        length as u64
+    } else {
+        0
+    }
+}
+
 fn with_reader(file: &str, f: impl FnOnce(&mut BufReader<Box<dyn ReadSeekImpl>>, u64)) {
+    // First check if this is a device path, volume, or mount point
+    let (resolved, is_device) = resolve_device_path(file);
+
+    if is_device {
+        match File::open(&resolved) {
+            Ok(fh) => {
+                let size = get_device_size(&fh);
+
+                if resolved.contains("PhysicalDrive") || resolved.contains("physicaldrive") {
+                    println!("Format: physical disk ({})", resolved);
+                } else if resolved.starts_with("/dev/") {
+                    println!("Format: block device ({})", resolved);
+                } else {
+                    println!("Format: volume ({})", resolved);
+                }
+
+                if size == 0 {
+                    eprintln!();
+                    eprintln!("Error: could not determine device size.");
+                    #[cfg(windows)]
+                    eprintln!("Make sure you are running as Administrator.");
+                    #[cfg(unix)]
+                    eprintln!("Make sure you are running with sudo.");
+                    return;
+                }
+
+                println!("Volume size: {:.2} GB", size as f64 / 1_073_741_824.0);
+
+                // Wrap in sector-aligned reader (required for Windows raw device I/O)
+                let sector = SectorReader::new(fh, 512, size);
+                let boxed: Box<dyn ReadSeekImpl> = Box::new(sector);
+                let mut buf = BufReader::new(boxed);
+                f(&mut buf, size);
+            }
+            Err(e) => {
+                eprintln!("Error opening device {}: {}", resolved, e);
+                #[cfg(windows)]
+                eprintln!("Hint: opening disk devices requires running as Administrator");
+                #[cfg(unix)]
+                eprintln!("Hint: opening block devices requires root privileges (try sudo)");
+            }
+        }
+        return;
+    }
+
+    // Regular file handling
     let ext = std::path::Path::new(file)
         .extension()
         .and_then(|e| e.to_str())

@@ -60,14 +60,27 @@ cargo install vshadow
 
 ## CLI Commands
 
+All commands accept forensic images (E01, dd/raw) **and mounted volumes/disks** (drive letters on Windows, `/dev/` devices or mount points on Linux/macOS).
+
 ### `info` — Detect VSS stores
 
 ```bash
+# From forensic image
 vshadow-rs info -f evidence.E01
 vshadow-rs info -f disk.dd --offset 0x26700000
+
+# From mounted volume (Windows — requires Administrator)
+vshadow-rs info -f C:
+vshadow-rs info -f "\\.\PhysicalDrive1"
+
+# From block device (Linux — requires root)
+sudo vshadow-rs info -f /dev/sda2
+sudo vshadow-rs info -f /mnt/evidence
 ```
 
-Auto-detects NTFS partitions (GPT + MBR), checks each one for VSS, reports store count, creation date, and how much data changed since the snapshot.
+Auto-detects NTFS partitions (GPT + MBR), checks each one for VSS, reports store count, creation date, and how much data changed since the snapshot. When a drive letter or mount point is provided, vshadow-rs resolves the underlying device and reads the raw volume with sector-aligned I/O.
+
+<img src="resources/vshadow-rs-volume.png" alt="vshadow-rs reading from mounted volume C:" width="700">
 
 ### `list` — Browse files
 
@@ -135,9 +148,11 @@ This lets you build a timeline of what the attacker deleted or modified, with fu
 
 3. **Direct E01 support**: read forensic images without mounting, converting, or extracting. One step from E01 to results.
 
-4. **Pure Rust, cross-platform**: no FUSE, no Windows APIs, no C libraries. Works on the analyst's machine regardless of OS.
+4. **Mounted volume / live disk support**: point vshadow-rs at a drive letter (`C:`, `D:`), a block device (`/dev/sda2`), or a mount point (`/mnt/evidence`) and it reads the raw volume directly with sector-aligned I/O. No need to image the disk first — ideal for triage or when working with a write-blocker.
 
-5. **Library + CLI**: use the `vshadow` crate in your own Rust tools, or use the `vshadow-rs` binary from the command line.
+5. **Pure Rust, cross-platform**: no FUSE, no Windows APIs, no C libraries. Works on the analyst's machine regardless of OS.
+
+6. **Library + CLI**: use the `vshadow` crate in your own Rust tools, or use the `vshadow-rs` binary from the command line.
 
 ---
 
@@ -156,6 +171,7 @@ This lets you build a timeline of what the attacker deleted or modified, with fu
 | **MACB timeline from delta** | - | - | - | **Yes** |
 | **Browse live volume** | - | - | - | **Yes** |
 | **Read E01 directly** | - | - | - | **Yes** |
+| **Read mounted volumes / live disks** | - | - | - | **Yes** |
 | **Auto-detect GPT/MBR** | - | - | - | **Yes** |
 | No C dependencies | - | - | - | **Yes** |
 | No FUSE required | Yes | - | Yes | **Yes** |
@@ -188,13 +204,19 @@ masstin -a parse-windows -d ./recovered/ -o lateral.csv
 
 ## Supported Formats
 
-| Format | Support |
-|--------|---------|
-| E01 (Expert Witness Format) | Built-in via `ewf` crate |
-| Raw / dd / 001 | Native |
-| Partition images | Direct (offset = 0) |
+| Format | Support | Example |
+|--------|---------|---------|
+| E01 (Expert Witness Format) | Built-in via `ewf` crate | `vshadow-rs info -f evidence.E01` |
+| Raw / dd / 001 | Native | `vshadow-rs info -f disk.dd` |
+| Partition images | Direct (offset = 0) | `vshadow-rs info -f partition.raw` |
+| Windows drive letter | Sector-aligned raw I/O | `vshadow-rs info -f C:` |
+| Windows physical disk | Sector-aligned raw I/O | `vshadow-rs info -f "\\.\PhysicalDrive1"` |
+| Linux block device | Direct | `sudo vshadow-rs info -f /dev/sda2` |
+| Linux/macOS mount point | Auto-resolves to device | `sudo vshadow-rs info -f /mnt/evidence` |
 
 **Windows versions:** Vista through Windows 11, Server 2008 through 2022 (VSS v1 and v2).
+
+> **Note:** Reading mounted volumes and physical disks requires elevated privileges (Administrator on Windows, root on Linux/macOS).
 
 ---
 
@@ -248,6 +270,7 @@ Read more: [masstin article on weinvestigateanything.com](https://weinvestigatea
 
 ## Future Work
 
+- **masstin --volume flag**: allow masstin to use vshadow-rs mounted volume support to process VSS directly from a connected disk, without creating an image first
 - **VMDK / VHD / VHDX support**: read VSS from virtual machine disk images directly
 - **Multi-store delta**: compare across multiple VSS snapshots to build a full change history
 - **Deleted file recovery**: detect and recover files that were deleted between snapshots using MFT analysis

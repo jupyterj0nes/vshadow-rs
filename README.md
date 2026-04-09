@@ -1,6 +1,8 @@
 # vshadow-rs
 
 <div align="center">
+  <img src="resources/vshadow-rs-logo.png" alt="vshadow-rs logo" width="300">
+  <br><br>
   <strong>Pure Rust parser for Windows Volume Shadow Copy (VSS) snapshots</strong>
   <br><br>
 
@@ -13,7 +15,7 @@
 
 ---
 
-Inspect, list and extract files from Windows Volume Shadow Copy snapshots inside forensic disk images. **No Windows APIs. No FUSE. No C dependencies. Cross-platform.**
+Identify, timeline and recover files from the shadows. **No Windows APIs. No FUSE. No C dependencies. Cross-platform.**
 
 > Part of the [We Investigate Anything](https://weinvestigateanything.com) project.
 > Full documentation: [vshadow-rs article](https://weinvestigateanything.com/en/tools/vshadow-rs/) |
@@ -30,7 +32,7 @@ Attackers clear Windows event logs. Volume Shadow Copies preserve the old data. 
 | **vshadowmount** | Requires FUSE, Linux only, can't read E01 |
 | **EVTXECmd --vss** | Requires Windows VSS COM API, live systems only |
 
-**vshadow-rs** reads the on-disk VSS format directly from any forensic image. One binary, any platform.
+**vshadow-rs** reads the on-disk VSS format directly from any forensic image. One binary, any platform. And unlike any other tool, it can **compare snapshots against the live volume** to show you exactly what changed — the delta that tells the story.
 
 ---
 
@@ -40,29 +42,6 @@ Attackers clear Windows event logs. Volume Shadow Copies preserve the old data. 
 cargo install vshadow
 ```
 
-```
-$ vshadow-info info -f HRServer_Disk0.e01
-
-vshadow-info v0.1.1
-Inspecting: HRServer_Disk0.e01
-
-Format: E01 (Expert Witness Format)
-Image size: 50.00 GB
-
-Found 1 NTFS partition(s)
-
-=== Partition 1 ===
-  Offset:          0x1f500000 (0.49 GB into disk)
-  VSS detected:    YES (signature found at partition offset 0x1E00)
-  Snapshots:       1
-
-  Store 0:
-    GUID:            4479c1da-99b9-11e8-b7f4-acd82990ee82
-    Created:         2018-08-07 23:07:58 UTC
-    Sequence:        1
-    Changed blocks:  9593 (149.9 MB modified since snapshot)
-```
-
 ---
 
 ## CLI Commands
@@ -70,8 +49,8 @@ Found 1 NTFS partition(s)
 ### `info` — Detect VSS stores
 
 ```bash
-vshadow-info info -f evidence.E01
-vshadow-info info -f disk.dd --offset 0x26700000
+vshadow-rs info -f evidence.E01
+vshadow-rs info -f disk.dd --offset 0x26700000
 ```
 
 Auto-detects NTFS partitions (GPT + MBR), checks each one for VSS, reports store count, creation date, and how much data changed since the snapshot.
@@ -80,21 +59,90 @@ Auto-detects NTFS partitions (GPT + MBR), checks each one for VSS, reports store
 
 ```bash
 # Live volume
-vshadow-info list -f evidence.E01 --live -p "Windows/System32/winevt/Logs"
+vshadow-rs list -f evidence.E01 --live -p "Windows/System32/winevt/Logs"
 
 # VSS store (the snapshot — see what was there BEFORE the attacker cleared logs)
-vshadow-info list -f evidence.E01 -s 0 -p "Windows/System32/winevt/Logs"
+vshadow-rs list -f evidence.E01 -s 0 -p "Windows/System32/winevt/Logs"
 ```
+
+### `list-delta` — Find what changed between VSS and live volume
+
+This is what makes vshadow-rs unique. It compares the snapshot filesystem against the live volume and shows you only the files that were **deleted** or **changed** — the forensic gold.
+
+```bash
+# Show delta for all VSS stores
+vshadow-rs list-delta -f evidence.E01
+
+# Focus on event logs only
+vshadow-rs list-delta -f evidence.E01 -p "Windows/System32/winevt/Logs"
+
+# Export delta to CSV
+vshadow-rs list-delta -f evidence.E01 -o delta.csv
+```
+
+<img src="resources/vshadow-rs-list-delta.png" alt="vshadow-rs list-delta output" width="700">
+
+The output shows each changed file with its size on the live volume vs. the VSS store, making it immediately obvious when logs have been cleared (68 KB in VSS → 1 MB on live, or missing entirely).
 
 ### `extract` — Recover files
 
 ```bash
 # Recover event logs from VSS (deleted from live but preserved in snapshot)
-vshadow-info extract -f evidence.E01 -s 0 -p "Windows/System32/winevt/Logs" -o ./recovered/
+vshadow-rs extract -f evidence.E01 -s 0 -p "Windows/System32/winevt/Logs" -o ./recovered/
 
 # Extract from live volume for comparison
-vshadow-info extract -f evidence.E01 --live -p "Windows/System32/winevt/Logs" -o ./live/
+vshadow-rs extract -f evidence.E01 --live -p "Windows/System32/winevt/Logs" -o ./live/
 ```
+
+### `timeline` — Generate MACB timeline from VSS stores
+
+Generates a full MACB (Modified, Accessed, Changed, Born) timeline CSV from the delta — only files that exist in VSS but not on the live volume, or that changed. Two output formats:
+
+```bash
+# Expanded format: 8 rows per file (SI + FN timestamps)
+vshadow-rs timeline -f evidence.E01 -o timeline.csv
+
+# MACB format: 1 row per file with MACB flags
+vshadow-rs timeline -f evidence.E01 --format macb -o timeline.csv
+
+# Include live volume in the timeline
+vshadow-rs timeline -f evidence.E01 --include-live -o timeline.csv
+```
+
+This lets you build a timeline of what the attacker deleted or modified, with full NTFS timestamp precision.
+
+---
+
+## What makes vshadow-rs unique
+
+1. **Delta detection** (`list-delta`): no other tool compares VSS snapshots against the live volume to show exactly what changed. This is the fastest way to find cleared logs, deleted files, and tampered evidence.
+
+2. **MACB timelines from shadows** (`timeline`): generate forensic timelines from the delta — only the relevant changes, not the entire filesystem. Feed directly into timeline analysis tools.
+
+3. **Direct E01 support**: read forensic images without mounting, converting, or extracting. One step from E01 to results.
+
+4. **Pure Rust, cross-platform**: no FUSE, no Windows APIs, no C libraries. Works on the analyst's machine regardless of OS.
+
+5. **Library + CLI**: use the `vshadow` crate in your own Rust tools, or use the `vshadow-rs` binary from the command line.
+
+---
+
+## Comparison
+
+| Feature | vshadowmount | vshadowinfo | **vshadow-rs** |
+|---------|:---:|:---:|:---:|
+| List VSS stores | - | Yes | **Yes** |
+| Show creation dates | - | Yes | **Yes** |
+| Show delta size (changed blocks) | - | - | **Yes** |
+| Mount as FUSE filesystem | Yes | - | - |
+| **List files inside VSS** | via mount | - | **Yes** |
+| **Extract files from VSS** | via mount | - | **Yes** |
+| **Compare VSS vs live (delta)** | - | - | **Yes** |
+| **MACB timeline from delta** | - | - | **Yes** |
+| **Browse live volume** | - | - | **Yes** |
+| **Read E01 directly** | - | - | **Yes** |
+| **Auto-detect GPT/MBR** | - | - | **Yes** |
+| Cross-platform | Linux | Linux/Mac/Win | **All** |
 
 ---
 
@@ -102,22 +150,32 @@ vshadow-info extract -f evidence.E01 --live -p "Windows/System32/winevt/Logs" -o
 
 ```bash
 # 1. Inspect image for shadow copies
-vshadow-info info -f suspect.E01
+vshadow-rs info -f suspect.E01
 
-# 2. Compare Security.evtx between live and snapshot
-#    (cleared logs = much smaller file on live volume)
-vshadow-info list -f suspect.E01 --live -p "Windows/System32/winevt/Logs"
-vshadow-info list -f suspect.E01 -s 0 -p "Windows/System32/winevt/Logs"
+# 2. Find what changed between VSS and live volume
+vshadow-rs list-delta -f suspect.E01 -p "Windows/System32/winevt/Logs"
 
 # 3. Recover the pre-deletion event logs
-vshadow-info extract -f suspect.E01 -s 0 -p "Windows/System32/winevt/Logs" -o ./recovered/
+vshadow-rs extract -f suspect.E01 -s 0 -p "Windows/System32/winevt/Logs" -o ./recovered/
 
-# 4. Generate lateral movement timeline with masstin
-masstin -a parse-windows -d ./recovered/ -o timeline.csv
+# 4. Generate a timeline of deleted/modified files
+vshadow-rs timeline -f suspect.E01 -o timeline.csv
 
-# 5. Visualize in Memgraph
-masstin -a load-memgraph -f timeline.csv --database localhost:7687
+# 5. Parse recovered logs with masstin
+masstin -a parse-windows -d ./recovered/ -o lateral.csv
 ```
+
+---
+
+## Supported Formats
+
+| Format | Support |
+|--------|---------|
+| E01 (Expert Witness Format) | Built-in via `ewf` crate |
+| Raw / dd / 001 | Native |
+| Partition images | Direct (offset = 0) |
+
+**Windows versions:** Vista through Windows 11, Server 2008 through 2022 (VSS v1 and v2).
 
 ---
 
@@ -145,35 +203,6 @@ for i in 0..vss.store_count() {
 
 ---
 
-## Comparison
-
-| Feature | vshadowmount | vshadowinfo | **vshadow-info** |
-|---------|:---:|:---:|:---:|
-| List VSS stores | - | Yes | **Yes** |
-| Show creation dates | - | Yes | **Yes** |
-| Show delta size (changed blocks) | - | - | **Yes** |
-| Mount as FUSE filesystem | Yes | - | - |
-| **List files inside VSS** | via mount | - | **Yes** |
-| **Extract files from VSS** | via mount | - | **Yes** |
-| **Browse live volume** | - | - | **Yes** |
-| **Read E01 directly** | - | - | **Yes** |
-| **Auto-detect GPT/MBR** | - | - | **Yes** |
-| Cross-platform | Linux | Linux/Mac/Win | **All** |
-
----
-
-## Supported Formats
-
-| Format | Support |
-|--------|---------|
-| E01 (Expert Witness Format) | Built-in via `ewf` crate |
-| Raw / dd / 001 | Native |
-| Partition images | Direct (offset = 0) |
-
-**Windows versions:** Vista through Windows 11, Server 2008 through 2022 (VSS v1 and v2).
-
----
-
 ## How VSS Works
 
 VSS is a **copy-on-write** mechanism at the block level (16 KiB blocks):
@@ -183,18 +212,6 @@ VSS is a **copy-on-write** mechanism at the block level (16 KiB blocks):
 3. **Reconstruction** → changed blocks read from store, unchanged blocks read from live volume
 
 The delta (changed blocks) tells you how much the disk changed since the snapshot. A small delta means the snapshot is very close to the current state. A large delta means significant changes occurred — possibly including log clearing.
-
----
-
-## Documentation
-
-| Topic | Link |
-|-------|------|
-| vshadow-rs full guide | [weinvestigateanything.com — vshadow-rs](https://weinvestigateanything.com/en/tools/vshadow-rs/) |
-| masstin (lateral movement analysis) | [weinvestigateanything.com — masstin](https://weinvestigateanything.com/en/tools/masstin-lateral-movement-rust/) |
-| Security.evtx forensic artifacts | [weinvestigateanything.com — Security.evtx](https://weinvestigateanything.com/en/artifacts/security-evtx-lateral-movement/) |
-| Neo4j graph visualization | [weinvestigateanything.com — Neo4j](https://weinvestigateanything.com/en/tools/neo4j-cypher-visualization/) |
-| Memgraph visualization | [weinvestigateanything.com — Memgraph](https://weinvestigateanything.com/en/tools/memgraph-visualization/) |
 
 ---
 

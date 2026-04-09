@@ -11,8 +11,8 @@ categories = ["filesystem", "parser-implementations"]
 readme = "README.md"
 
 [[bin]]
-name = "vshadow-info"
-path = "src/bin/vshadow_info.rs"
+name = "vshadow-rs"
+path = "src/bin/vshadow_rs.rs"
 
 [dependencies]
 uuid = { version = "1", features = ["v4"] }

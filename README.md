@@ -1,7 +1,7 @@
 # vshadow-rs
 
 <div align="center">
-  <img src="resources/vshadow-rs-logo.png" alt="vshadow-rs logo" width="300">
+  <img src="resources/vshadow-rs-logo.png" alt="vshadow-rs logo" width="500">
   <br><br>
   <strong>Pure Rust parser for Windows Volume Shadow Copy (VSS) snapshots</strong>
   <br><br>
@@ -36,7 +36,13 @@ Attackers clear Windows event logs. Volume Shadow Copies preserve the old data. 
 
 ---
 
-## Quick Start
+## Install
+
+### Download pre-built binary
+
+Pre-built binaries for Windows, Linux and macOS are available in the [GitHub Releases](https://github.com/jupyterj0nes/vshadow-rs/releases). Download the binary for your platform and run it directly — no Rust toolchain needed.
+
+### Build from source
 
 ```bash
 cargo install vshadow
@@ -212,6 +218,18 @@ VSS is a **copy-on-write** mechanism at the block level (16 KiB blocks):
 3. **Reconstruction** → changed blocks read from store, unchanged blocks read from live volume
 
 The delta (changed blocks) tells you how much the disk changed since the snapshot. A small delta means the snapshot is very close to the current state. A large delta means significant changes occurred — possibly including log clearing.
+
+---
+
+## Integration with masstin
+
+[masstin](https://github.com/jupyterj0nes/masstin) is a lateral movement tracker that uses vshadow-rs under the hood. With a single command it processes a forensic image end-to-end: detects partitions, recovers EVTX from live volume and all VSS snapshots, deduplicates, and generates a unified lateral movement timeline.
+
+```bash
+masstin -a parse-image-windows -f evidence.E01 -o timeline.csv
+```
+
+Read more: [masstin article on weinvestigateanything.com](https://weinvestigateanything.com/en/tools/masstin-lateral-movement-rust/)
 
 ---
 

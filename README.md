@@ -17,6 +17,8 @@
 
 Identify, timeline and recover files from the shadows. **No Windows APIs. No FUSE. No C dependencies. Cross-platform.**
 
+The logo is [Ferris](https://rustacean.net/) (the Rust crab) wearing a miner's helmet — a nod to the coal miners of [Leon, Spain](https://en.wikipedia.org/wiki/Province_of_Le%C3%B3n), who dug through layers of darkness to bring what was hidden to the surface.
+
 > Part of the [We Investigate Anything](https://weinvestigateanything.com) project.
 > Full documentation: [vshadow-rs article](https://weinvestigateanything.com/en/tools/vshadow-rs/) |
 > Used by [masstin](https://github.com/jupyterj0nes/masstin) for forensic image analysis.

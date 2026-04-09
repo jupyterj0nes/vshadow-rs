@@ -38,11 +38,19 @@ Attackers clear Windows event logs. Volume Shadow Copies preserve the old data. 
 
 ## Install
 
-### Download pre-built binary
+### Download pre-built binary (recommended)
 
-Pre-built binaries for Windows, Linux and macOS are available in the [GitHub Releases](https://github.com/jupyterj0nes/vshadow-rs/releases). Download the binary for your platform and run it directly — no Rust toolchain needed.
+> **No Rust toolchain needed.** Just download and run.
 
-### Build from source
+| Platform | Download |
+|----------|----------|
+| Windows | [`vshadow-rs-windows.exe`](https://github.com/jupyterj0nes/vshadow-rs/releases/latest) |
+| Linux | [`vshadow-rs-linux`](https://github.com/jupyterj0nes/vshadow-rs/releases/latest) |
+| macOS | [`vshadow-rs-macos`](https://github.com/jupyterj0nes/vshadow-rs/releases/latest) |
+
+Go to [**Releases**](https://github.com/jupyterj0nes/vshadow-rs/releases) and download the binary for your platform. That's it.
+
+### Build from source (alternative)
 
 ```bash
 cargo install vshadow
@@ -135,20 +143,25 @@ This lets you build a timeline of what the attacker deleted or modified, with fu
 
 ## Comparison
 
-| Feature | vshadowmount | vshadowinfo | **vshadow-rs** |
-|---------|:---:|:---:|:---:|
-| List VSS stores | - | Yes | **Yes** |
-| Show creation dates | - | Yes | **Yes** |
-| Show delta size (changed blocks) | - | - | **Yes** |
-| Mount as FUSE filesystem | Yes | - | - |
-| **List files inside VSS** | via mount | - | **Yes** |
-| **Extract files from VSS** | via mount | - | **Yes** |
-| **Compare VSS vs live (delta)** | - | - | **Yes** |
-| **MACB timeline from delta** | - | - | **Yes** |
-| **Browse live volume** | - | - | **Yes** |
-| **Read E01 directly** | - | - | **Yes** |
-| **Auto-detect GPT/MBR** | - | - | **Yes** |
-| Cross-platform | Linux | Linux/Mac/Win | **All** |
+| Feature | libvshadow (C) | vshadowmount | vshadowinfo | **vshadow-rs** |
+|---------|:---:|:---:|:---:|:---:|
+| Language | C | C (libvshadow) | C (libvshadow) | **Rust** |
+| List VSS stores | Yes | - | Yes | **Yes** |
+| Show creation dates | Yes | - | Yes | **Yes** |
+| Show delta size (changed blocks) | - | - | - | **Yes** |
+| Mount as FUSE filesystem | - | Yes | - | - |
+| **List files inside VSS** | - | via mount | - | **Yes** |
+| **Extract files from VSS** | - | via mount | - | **Yes** |
+| **Compare VSS vs live (delta)** | - | - | - | **Yes** |
+| **MACB timeline from delta** | - | - | - | **Yes** |
+| **Browse live volume** | - | - | - | **Yes** |
+| **Read E01 directly** | - | - | - | **Yes** |
+| **Auto-detect GPT/MBR** | - | - | - | **Yes** |
+| No C dependencies | - | - | - | **Yes** |
+| No FUSE required | Yes | - | Yes | **Yes** |
+| Cross-platform | Linux/Mac | Linux | Linux/Mac/Win | **All** |
+
+> **libvshadow** is the reference C library by Joachim Metz. vshadowmount and vshadowinfo are its CLI tools. vshadow-rs is a completely independent implementation in Rust — it does not use libvshadow.
 
 ---
 
@@ -230,6 +243,16 @@ masstin -a parse-image-windows -f evidence.E01 -o timeline.csv
 ```
 
 Read more: [masstin article on weinvestigateanything.com](https://weinvestigateanything.com/en/tools/masstin-lateral-movement-rust/)
+
+---
+
+## Future Work
+
+- **VMDK / VHD / VHDX support**: read VSS from virtual machine disk images directly
+- **Multi-store delta**: compare across multiple VSS snapshots to build a full change history
+- **Deleted file recovery**: detect and recover files that were deleted between snapshots using MFT analysis
+- **Integration with Plaso/log2timeline**: export timelines in formats compatible with existing DFIR toolchains
+- **AFF4 support**: read from AFF4 forensic images
 
 ---
 
